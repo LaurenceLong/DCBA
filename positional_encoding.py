@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import math
 
-from models.base_model import generate_casual_mask
+from models.base_model import generate_causal_mask
 
 
 def get_slopes(n_heads):
@@ -55,7 +55,7 @@ def test_build_alibi_tensor():
 
     print(3333, generate_rev_distance_matrix(seq_len, device))
 
-    attn_mask = generate_casual_mask(batch_size, num_heads, seq_len)
+    attn_mask = generate_causal_mask(batch_size, num_heads, seq_len)
     print(4444, build_alibi_tensor(attn_mask, dtype=torch.float32))
 
 

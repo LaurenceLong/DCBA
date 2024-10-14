@@ -1,7 +1,7 @@
 import math
 
 from config import CustomConfig
-from models.base_model import CustomTransformerBase, RotaryEmbedding, generate_casual_mask
+from models.base_model import CustomTransformerBase, RotaryEmbedding, generate_causal_mask
 from positional_encoding import generate_positions
 
 
@@ -18,7 +18,7 @@ class CustomTransformer(CustomTransformerBase):
         x = self.dropout(x)
         # Generate custom attention mask
         if attention_mask is None:
-            attention_mask = generate_casual_mask(batch_size, self.num_heads, seq_len).to(x.device)
+            attention_mask = generate_causal_mask(batch_size, self.num_heads, seq_len).to(x.device)
         # 添加位置编码
         batch_size, num_heads, seq_length, _ = attention_mask.shape
         # Generate position indices

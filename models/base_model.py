@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from config import CustomConfig
 
 
-def generate_casual_mask(batch_size, num_heads, seq_len):
+def generate_causal_mask(batch_size, num_heads, seq_len):
     # 创建基础掩码（下三角矩阵）
     mask = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool))
     mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
@@ -22,7 +22,7 @@ def create_sinusoidal_embeddings(max_seq_len, d_model):
     pe = torch.zeros(max_seq_len, d_model)
     pe[:, 0::2] = torch.sin(position * div_term)
     pe[:, 1::2] = torch.cos(position * div_term)
-    return nn.Parameter(pe.unsqueeze(0), requires_grad=False)
+    return pe.unsqueeze(0)
 
 
 def rotate_half(x):
@@ -163,7 +163,7 @@ class CustomTransformerBase(nn.Module):
         x = self.dropout(x)
         # Generate custom attention mask
         if attention_mask is None:
-            attention_mask = generate_casual_mask(batch_size, self.num_heads, seq_len).to(x.device)
+            attention_mask = generate_causal_mask(batch_size, self.num_heads, seq_len).to(x.device)
         # todo 添加位置编码
         # Process through transformer blocks
         for layer in self.layers:

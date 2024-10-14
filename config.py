@@ -9,9 +9,11 @@ class InitFrom:
 @dataclass
 class CustomConfig:
     # model params
-    hidden_size: int = 768
-    num_heads: int = 12
-    num_layers: int = 12
+    hidden_size: int = 128
+    num_heads: int = 4
+    num_layers: int = 4
+    num_bias_heads: int = 4
+    num_bias_layers: int = 4
     vocab_size: int = -1
     char_vocab_size: int = -1
     token_vocab_size: int = -1
@@ -23,9 +25,9 @@ class CustomConfig:
     weight_decay: float = 1e-1
     betas: tuple = (0.9, 0.95)
     batch_size: int = 16
-    num_epochs: int = 10
-    log_interval: int = 100
-    eval_interval: int = 100
-    eval_iters: int = 50
+    num_epochs: int = 1
+    log_interval: int = 20
+    eval_interval: int = 20
+    eval_iters: int = 10
     save_interval: int = 5000
     init_from: int = InitFrom.scratch

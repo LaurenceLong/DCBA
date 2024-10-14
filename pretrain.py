@@ -39,7 +39,7 @@ log_filename = f"training_{timestamp}.log"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# device = "cpu"
+device = "cpu"
 
 
 def train(model, train_dataloader, val_dataloader, config):
