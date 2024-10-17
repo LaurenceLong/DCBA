@@ -39,7 +39,7 @@ log_filename = f"training_{timestamp}.log"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-device = "cpu"
+# device = "cpu"
 
 
 def train(model, train_dataloader, val_dataloader, config):
@@ -141,13 +141,11 @@ if __name__ == "__main__":
 
     # 更新配置中的词汇表大小
     config.vocab_size = tokenizer.vocab_size
-    config.char_vocab_size = tokenizer.u8_vocab_size
-    config.token_vocab_size = tokenizer.token_vocab_size
 
     # 准备数据
-    cwd = os.path.dirname(os.path.abspath(__file__))
-    train_ds = [os.path.join(cwd, 'data/arithmetic_data.txt')]
-    val_ds = [os.path.join(cwd, 'data/arithmetic_validation.txt')]
+    root = os.path.dirname(os.path.abspath(__file__))
+    train_ds = [os.path.join(root, 'data/arithmetic_data.txt')]
+    val_ds = [os.path.join(root, 'data/arithmetic_validation.txt')]
     train_dataset = CustomTextDataset(train_ds, tokenizer, config.max_seq_len)
     val_dataset = CustomTextDataset(val_ds, tokenizer, config.max_seq_len)
 

@@ -11,12 +11,8 @@ class CustomConfig:
     # model params
     hidden_size: int = 128
     num_heads: int = 4
-    num_layers: int = 4
-    num_bias_heads: int = 4
-    num_bias_layers: int = 4
+    num_layers: int = 16
     vocab_size: int = -1
-    char_vocab_size: int = -1
-    token_vocab_size: int = -1
     max_seq_len: int = 128
     dropout: float = 0.1
     layer_norm_eps: float = 1e-6
@@ -25,7 +21,7 @@ class CustomConfig:
     weight_decay: float = 1e-1
     betas: tuple = (0.9, 0.95)
     batch_size: int = 16
-    num_epochs: int = 1
+    num_epochs: int = 40
     log_interval: int = 20
     eval_interval: int = 20
     eval_iters: int = 10

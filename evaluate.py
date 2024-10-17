@@ -26,7 +26,8 @@ def generate_text(model, tokenizer, prompt, max_new_tokens):
         # print(3333, input_ids, start_pos)
         if not inited:
             inited = True
-        generated = model.generate(input_ids, max_new_tokens, tokenizer.eos_token_id, tokenizer=tokenizer)
+        # generated = model.generate(input_ids, max_new_tokens, tokenizer.eos_token_id, tokenizer=tokenizer)
+        generated = model.generate(input_ids, max_new_tokens, tokenizer.eos_token_id)
         # print(4444, generated)
         current = decode_text(generated, tokenizer)
         if generated[0][-1] == tokenizer.eos_token_id:
@@ -41,8 +42,6 @@ def valid_generate(model_path=None):
 
     config = CustomConfig()
     config.vocab_size = tokenizer.vocab_size
-    config.char_vocab_size = tokenizer.u8_vocab_size
-    config.token_vocab_size = tokenizer.token_vocab_size
     config.dropout = 0
     model = DCBATransformer(config)
     # 最后加载模型权重
@@ -68,8 +67,6 @@ def batch_evaluate(file_name="data/arithmetic_test.txt", model_path=None):
     tokenizer = MixedTokenizer()
     config = CustomConfig()
     config.vocab_size = tokenizer.vocab_size
-    config.char_vocab_size = tokenizer.u8_vocab_size
-    config.token_vocab_size = tokenizer.token_vocab_size
     config.dropout = 0
     model = DCBATransformer(config)
     # 最后加载模型权重
@@ -81,8 +78,8 @@ def batch_evaluate(file_name="data/arithmetic_test.txt", model_path=None):
     model.eval()
     show_model_parameters(model)
 
-    cwd = os.path.dirname(os.path.abspath(__file__))
-    file_path = os.path.join(cwd, file_name)
+    root = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(root, file_name)
     with open(file_path, encoding="utf-8") as fd:
         lines = fd.readlines()
     for li in lines:

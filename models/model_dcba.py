@@ -3,8 +3,10 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
 
 from config import CustomConfig
+from positional_encoding import build_alibi_tensor
 
 
 def generate_causal_mask(batch_size, num_heads, seq_len):
@@ -41,72 +43,52 @@ class FeedForward(nn.Module):
         return self.dropout(self.w2(F.silu(self.w1(x)) * self.w3(x)))
 
 
-class MultiHeadAttention(nn.Module):
-    def __init__(self, hidden_size, num_heads, dropout=0.1):
+class DynamicContextualBias(nn.Module):
+    def __init__(self, npos_max, head_dim, num_heads, mlp_width=32):
         super().__init__()
-        self.num_heads = num_heads
-        self.hidden_size = hidden_size
-        self.head_dim = hidden_size // num_heads
-
-        self.q_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.k_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.v_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.o_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x, attention_mask=None):
-        batch_size, seq_len, _ = x.size()
-
-        q = self.q_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-
-        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-
-        if attention_mask is not None:
-            scores = scores + attention_mask
-
-        attn = F.softmax(scores, dim=-1)
-        attn = self.dropout(attn)
-
-        out = torch.matmul(attn, v)
-        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.hidden_size)
-        return self.o_proj(out)
-
-
-class ContextualBiasBlock(nn.Module):
-    def __init__(self, hidden_size, num_heads, num_bias_heads, intermediate_size, dropout=0.1, layer_norm_eps=1e-5):
-        super().__init__()
-        self.attention = MultiHeadAttention(hidden_size, num_bias_heads, dropout=dropout)
-        self.feed_forward = FeedForward(hidden_size, intermediate_size, dropout)
-        self.attention_norm = RMSNorm(hidden_size, eps=layer_norm_eps)
-        self.ffn_norm = RMSNorm(hidden_size, eps=layer_norm_eps)
-        self.dropout = nn.Dropout(dropout)
+        self.npos_max = npos_max
+        self.head_dim = head_dim
         self.num_heads = num_heads
 
-    def forward(self, x, attention_mask=None):
-        # x shape: (batch_size, num_heads, seq_len, seq_len)
-        batch_size, num_heads, seq_len, _ = x.size()
+        # CoPE部分
+        self.pos_emb = nn.Parameter(torch.zeros(1, head_dim, npos_max))
 
-        # Reshape x to (batch_size * num_heads, seq_len, seq_len)
-        x_reshaped = x.view(batch_size * num_heads, seq_len, seq_len)
+        # DAPE部分
+        self.mlp = nn.Sequential(
+            nn.Linear(2 * num_heads, mlp_width),
+            nn.SiLU(),
+            nn.Linear(mlp_width, num_heads)
+        )
 
-        # Apply attention and feed-forward layers
-        x_reshaped = self.attention_norm(x_reshaped)
-        attention_output = self.attention(x_reshaped, attention_mask)
-        x_reshaped = x_reshaped + self.dropout(attention_output)
+    def forward(self, query, attn_logits):
+        # CoPE部分：计算连续位置
+        gates = torch.sigmoid(attn_logits)
+        pos = gates.flip(-1).cumsum(dim=-1).flip(-1)
+        pos = pos.clamp(max=self.npos_max - 1)
 
-        x_reshaped = self.ffn_norm(x_reshaped)
-        ff_output = self.feed_forward(x_reshaped)
-        x_reshaped = x_reshaped + self.dropout(ff_output)
+        # 插值
+        pos_ceil = pos.ceil().long()
+        pos_floor = pos.floor().long()
+        logits_int = torch.matmul(query, self.pos_emb)
+        logits_ceil = logits_int.gather(-1, pos_ceil)
+        logits_floor = logits_int.gather(-1, pos_floor)
+        w = pos - pos_floor
 
-        # Reshape back to (batch_size, num_heads, seq_len, seq_len)
-        return x_reshaped.view(batch_size, num_heads, seq_len, seq_len)
+        cope_bias = logits_ceil * w + logits_floor * (1 - w)
+
+        # DAPE部分：动态调整
+        cope_bias = rearrange(cope_bias, 'b h s1 s2 -> b s1 s2 h')
+        attn_logits = rearrange(attn_logits, 'b h s1 s2 -> b s1 s2 h')
+
+        combined = torch.cat((attn_logits, cope_bias), dim=-1)
+        dynamic_bias = self.mlp(combined)
+
+        dynamic_bias = rearrange(dynamic_bias, 'b s1 s2 h -> b h s1 s2')
+        return dynamic_bias
 
 
 class DCBAttention(nn.Module):
-    def __init__(self, hidden_size, num_heads, num_bias_layers, num_bias_heads, dropout=0.1, layer_norm_eps=1e-5):
+    def __init__(self, hidden_size, num_heads, dropout=0.1, npos_max=128):
         super().__init__()
         self.num_heads = num_heads
         self.hidden_size = hidden_size
@@ -119,11 +101,7 @@ class DCBAttention(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-        self.contextual_bias_layers = nn.ModuleList(
-            [ContextualBiasBlock(hidden_size, num_heads, num_bias_heads, hidden_size * 4, dropout=dropout,
-                                 layer_norm_eps=layer_norm_eps)
-             for _ in range(num_bias_layers)]
-        )
+        self.contextual_bias_layer = DynamicContextualBias(npos_max, self.head_dim, num_heads)
 
     def forward(self, x, attention_mask=None):
         batch_size, seq_len, _ = x.size()
@@ -135,9 +113,8 @@ class DCBAttention(nn.Module):
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
 
         # Calculate dynamic contextual bias based on scores
-        bias = scores
-        for bias_layer in self.contextual_bias_layers:
-            bias = bias_layer(bias, attention_mask)
+        # bias = build_alibi_tensor(scores, scores.dtype)
+        bias = self.contextual_bias_layer(q, scores)
         scores += bias
 
         if attention_mask is not None:
@@ -152,10 +129,9 @@ class DCBAttention(nn.Module):
 
 
 class DCBATransformerBlock(nn.Module):
-    def __init__(self, hidden_size, num_heads, intermediate_size, num_bias_layers, num_bias_heads, dropout=0.1,
-                 layer_norm_eps=1e-5):
+    def __init__(self, hidden_size, num_heads, intermediate_size, dropout=0.1, layer_norm_eps=1e-5, npos_max=128):
         super().__init__()
-        self.attention = DCBAttention(hidden_size, num_heads, num_bias_layers, num_bias_heads, dropout, layer_norm_eps)
+        self.attention = DCBAttention(hidden_size, num_heads, dropout, npos_max)
         self.feed_forward = FeedForward(hidden_size, intermediate_size, dropout)
         self.attention_norm = RMSNorm(hidden_size, eps=layer_norm_eps)
         self.ffn_norm = RMSNorm(hidden_size, eps=layer_norm_eps)
@@ -182,15 +158,13 @@ class DCBATransformer(nn.Module):
         self.pad_token_id = 0
         self.hidden_size = cfg.hidden_size
         self.num_heads = cfg.num_heads
-        self.num_bias_heads = cfg.num_bias_heads
         self.embedding = nn.Embedding(cfg.vocab_size, cfg.hidden_size)
         self.layers = nn.ModuleList(
             [DCBATransformerBlock(cfg.hidden_size, cfg.num_heads, cfg.hidden_size * 4,
-                                  cfg.num_bias_layers, cfg.num_bias_heads,
-                                  cfg.dropout, cfg.layer_norm_eps)
+                                  cfg.dropout, cfg.layer_norm_eps, cfg.max_seq_len)
              for _ in range(cfg.num_layers)]
         )
-        self.fc = nn.Linear(cfg.hidden_size, cfg.token_vocab_size)
+        self.fc = nn.Linear(cfg.hidden_size, cfg.vocab_size)
         self.dropout = nn.Dropout(cfg.dropout)
 
     def forward(self, input_ids, attention_mask=None):

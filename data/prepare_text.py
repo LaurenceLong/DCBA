@@ -50,7 +50,7 @@ class CustomTextDataset(Dataset):
             lengths.append(len(tokens))
 
         table = pa.Table.from_arrays(
-            [pa.array(tokenized_lines, type=pa.list_(pa.uint16())), lengths],
+            [pa.array(tokenized_lines, type=pa.list_(pa.uint32())), lengths],
             names=['tokens', 'lengths']
         )
         pq.write_table(table, output_file)
@@ -78,3 +78,20 @@ class CustomTextDataset(Dataset):
 
         return src, tgt
 
+
+class CustomTextDatasetFlat(CustomTextDataset):
+    def __getitem__(self, idx):
+        data_index, elem_idx = self.nested_list_index.find_list_index(idx)
+        sample = self.data[data_index].column('tokens')[elem_idx].as_py()
+
+        # 使用切片操作来限制样本长度
+        sample = sample[-self.max_seq_len - 1:]  # 多取一个元素，为了后面的src和tgt
+
+        # 使用torch.tensor()一次性创建张量，避免多次转换
+        src = torch.tensor(sample, dtype=torch.long)
+
+        # 使用 F.pad 进行填充，这通常比手动填充更快
+        if len(src) < self.max_seq_len:
+            src = F.pad(src, (0, self.max_seq_len - len(src)), value=0)
+
+        return src
